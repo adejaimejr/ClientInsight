@@ -1,6 +1,8 @@
-# 🏆 ClientInsight: Análise de Clientes
+# 🏆 ClientInsight: Sistema de Classificação de Clientes
 
 <div align="center">
+
+![ClientInsight Banner](banner.svg)
 
 ![Version](https://img.shields.io/badge/versão-1.0.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.12+-yellow?logo=python)
@@ -9,9 +11,11 @@
 
 </div>
 
+> **Sistema de classificação de clientes em níveis (Diamante, Ouro, Prata, Bronze) baseado em análise de dados de compras, pagamentos e comportamento.**
+
 ## 📋 Visão Geral
 
-Este sistema foi desenvolvido para analisar o comportamento de compra dos clientes e criar um sistema de classificação baseado em diversos indicadores de desempenho. O objetivo é categorizar os clientes em diferentes níveis (Diamante, Ouro, Prata, Bronze) com base em seus padrões de compra, fidelidade e valor.
+Este sistema analisa o comportamento de compra dos clientes e cria um sistema de classificação baseado em indicadores de desempenho. O objetivo é categorizar os clientes em diferentes níveis com base em seus padrões de compra, fidelidade e valor.
 
 O **ClientInsight** integra-se com a API Linx e-Millennium para extrair dados transacionais e de cadastro, processando-os para gerar insights valiosos sobre o comportamento dos clientes.
 
