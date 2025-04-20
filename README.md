@@ -1,4 +1,4 @@
-# 🏆 ClientInsight: Sistema Inteligente de Análise de Clientes
+# 🏆 ClientInsight: Análise de Clientes
 
 <div align="center">
 
