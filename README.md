@@ -34,7 +34,7 @@ O sistema coleta e analisa os seguintes indicadores para cada cliente:
 2. **💰 Volume de Negócios**: Faturamento total nos últimos 12 meses
 3. **🔄 Frequência de Compra**: Número de ciclos mensais em que o cliente realizou compras
 4. **🛍️ Quantidade de Itens**: Total de produtos adquiridos
-5. **⏱️ Pontualidade de Pagamento**: Percentual de pagamentos realizados dentro do prazo
+5. **⏱️ Pontualidade de Pagamento**: Percentual de títulos pagos dentro do prazo
 6. **🔀 Diversidade de Produtos**: Variedade de marcas adquiridas
 7. **📊 Valor por Categoria**: Distribuição de gastos entre marcas
 
@@ -129,10 +129,24 @@ Abaixo está um exemplo do resultado da análise para um cliente:
     "devolvidas": 12,
     "liquido": 133
   },
-  "pedidos_pagos_em_dia": {
+  "titulos_pagos_em_dia": {
     "total_lancamentos": 8,
-    "pagos_em_dia": 7,
-    "percentual_pagos_em_dia": 87.5,
+    "total_pagos": 6,
+    "total_a_vencer": 1,
+    "total_vencido": 1,
+    "percentual_pagos_total": 75.0,
+    "percentual_a_vencer": 12.5,
+    "percentual_vencido": 12.5,
+    "pagos_em_dia": 5,
+    "percentual_pagos_em_dia": 83.3,
+    "pagos_em_ate_7d": 1,
+    "percentual_pagos_em_ate_7d": 16.7,
+    "pagos_em_ate_15d": 0,
+    "percentual_pagos_em_ate_15d": 0.0,
+    "pagos_em_ate_30d": 0,
+    "percentual_pagos_em_ate_30d": 0.0,
+    "pagos_com_mais_30d": 0,
+    "percentual_pagos_com_mais_30d": 0.0,
     "usa_boleto": true
   },
   "valor_por_marca": {

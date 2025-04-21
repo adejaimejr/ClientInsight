@@ -159,15 +159,18 @@ def obter_data_primeira_compra(db, cliente_id=None, cod_cliente=None):
             # Adiciona o código do cliente ao filtro
             filtro_base["codigo_cliente_fornecedor"] = cod_cliente
             
-            # Busca as vendas do cliente, ordenadas por data (ascendente)
-            vendas = list(db.movimentacao.find(filtro_base).sort("data", 1).limit(1))
+            # Busca as vendas do cliente, ordenadas por data (ascendente para primeira compra)
+            primeira_compra = list(db.movimentacao.find(filtro_base).sort("data", 1).limit(1))
             
-            if vendas:
+            # Busca as vendas do cliente, ordenadas por data (descendente para última compra)
+            ultima_compra = list(db.movimentacao.find(filtro_base).sort("data", -1).limit(1))
+            
+            if primeira_compra:
                 return {
                     "codigo_cliente": cod_cliente,
-                    "data": vendas[0].get("data"),
-                    "data_formatada": vendas[0].get("data_"),
-                    "romaneio": vendas[0].get("romaneio")
+                    "data": primeira_compra[0].get("data"),
+                    "data_formatada": primeira_compra[0].get("data_"),
+                    "data_ultima_compra": ultima_compra[0].get("data") if ultima_compra else None
                 }
             
             return None
@@ -191,8 +194,11 @@ def obter_data_primeira_compra(db, cliente_id=None, cod_cliente=None):
             # Adiciona o código do cliente ao filtro
             filtro_cliente = {**filtro_base, "codigo_cliente_fornecedor": cod_cliente}
             
-            # Busca as vendas do cliente, ordenadas por data (ascendente)
+            # Busca as vendas do cliente, ordenadas por data (ascendente para primeira compra)
             primeira_compra = list(db.movimentacao.find(filtro_cliente).sort("data", 1).limit(1))
+            
+            # Busca as vendas do cliente, ordenadas por data (descendente para última compra)
+            ultima_compra = list(db.movimentacao.find(filtro_cliente).sort("data", -1).limit(1))
             
             if not primeira_compra:
                 continue
@@ -203,7 +209,7 @@ def obter_data_primeira_compra(db, cliente_id=None, cod_cliente=None):
                 "nome": cliente.get("razao_social", ""),
                 "data": primeira_compra[0].get("data"),
                 "data_formatada": primeira_compra[0].get("data_"),
-                "romaneio": primeira_compra[0].get("romaneio")
+                "data_ultima_compra": ultima_compra[0].get("data") if ultima_compra else None
             })
         
         return resultados
@@ -805,9 +811,18 @@ def obter_valor_por_marca(db, cliente_id=None, cod_cliente=None):
                 valor_por_marca[marca]["valor_devolucoes"] += valor
                 valor_por_marca[marca]["valor_liquido"] -= valor
             
+            # Ordena as marcas pelo valor líquido (do maior para o menor)
+            valor_por_marca_ordenado = {}
+            for marca, valores in sorted(
+                valor_por_marca.items(), 
+                key=lambda item: item[1]["valor_liquido"], 
+                reverse=True
+            ):
+                valor_por_marca_ordenado[marca] = valores
+            
             return {
                 "codigo_cliente": cod_cliente,
-                "valor_por_marca": valor_por_marca,
+                "valor_por_marca": valor_por_marca_ordenado,
                 "total_marcas": len(valor_por_marca)
             }
         
@@ -874,11 +889,20 @@ def obter_valor_por_marca(db, cliente_id=None, cod_cliente=None):
                 valor_por_marca[marca]["valor_devolucoes"] += valor
                 valor_por_marca[marca]["valor_liquido"] -= valor
             
+            # Ordena as marcas pelo valor líquido (do maior para o menor)
+            valor_por_marca_ordenado = {}
+            for marca, valores in sorted(
+                valor_por_marca.items(), 
+                key=lambda item: item[1]["valor_liquido"], 
+                reverse=True
+            ):
+                valor_por_marca_ordenado[marca] = valores
+            
             resultados.append({
                 "id": cliente.get("_id"),
                 "codigo_cliente": cod_cliente,
                 "nome": cliente.get("razao_social", ""),
-                "valor_por_marca": valor_por_marca,
+                "valor_por_marca": valor_por_marca_ordenado,
                 "total_marcas": len(valor_por_marca)
             })
         
@@ -911,6 +935,8 @@ def obter_numero_marcas_diferentes(db, cliente_id=None, cod_cliente=None):
             if isinstance(resultado, list):
                 # Se for uma lista de resultados (múltiplos clientes)
                 for item in resultado:
+                    # A lista de marcas seguirá a mesma ordem do campo valor_por_marca,
+                    # que já está ordenado pelo valor líquido
                     item["lista_marcas"] = list(item.get("valor_por_marca", {}).keys())
                 return resultado
             else:
@@ -918,6 +944,8 @@ def obter_numero_marcas_diferentes(db, cliente_id=None, cod_cliente=None):
                 return {
                     "codigo_cliente": resultado.get("codigo_cliente"),
                     "total_marcas": resultado.get("total_marcas", 0),
+                    # A lista de marcas seguirá a mesma ordem do campo valor_por_marca,
+                    # que já está ordenado pelo valor líquido
                     "lista_marcas": list(resultado.get("valor_por_marca", {}).keys())
                 }
         
@@ -927,9 +955,9 @@ def obter_numero_marcas_diferentes(db, cliente_id=None, cod_cliente=None):
         print(f"Erro ao calcular número de marcas diferentes: {e}")
         return None
 
-def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
+def obter_titulos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
     """
-    Calcula o total de pedidos pagos em dia pelo cliente.
+    Calcula o total de títulos pagos em dia pelo cliente.
     
     Args:
         db: Conexão com o banco de dados
@@ -937,9 +965,33 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
         cod_cliente: Código do cliente (opcional)
         
     Returns:
-        Total de pedidos pagos em dia ou lista de totais se cliente_id/cod_cliente não for fornecido
+        Total de títulos pagos em dia ou lista de totais se cliente_id/cod_cliente não for fornecido
     """
     try:
+        # Função auxiliar para ajustar datas de vencimento em fins de semana
+        def ajustar_data_vencimento(timestamp):
+            if timestamp is None:
+                return None
+                
+            # Converte timestamp para datetime
+            from datetime import datetime, timedelta
+            data = datetime.fromtimestamp(timestamp)
+            
+            # Verifica se é sábado (5) ou domingo (6)
+            dia_semana = data.weekday()
+            
+            if dia_semana == 5:  # Sábado
+                # Ajusta para segunda-feira (adiciona 2 dias)
+                data_ajustada = data + timedelta(days=2)
+                return int(data_ajustada.timestamp())
+            elif dia_semana == 6:  # Domingo
+                # Ajusta para segunda-feira (adiciona 1 dia)
+                data_ajustada = data + timedelta(days=1)
+                return int(data_ajustada.timestamp())
+            else:
+                # Não é fim de semana, mantém a data original
+                return timestamp
+        
         # Lista de tipos de pagamento válidos
         tipos_pagamento = [
             "BOLETO",
@@ -952,6 +1004,7 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
         # Filtro base para lançamentos
         filtro_base = {
             "tipo": "R",
+            "substituido": False,
             "titulo": True,
             "tipo_pgto_descricao": {"$in": tipos_pagamento}
             # Removemos a restrição de data_pagamento para verificar todos os lançamentos
@@ -969,7 +1022,7 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
             filtro_base["cod_gerador"] = cod_cliente
             
             # Busca todos os lançamentos do cliente
-            lancamentos = list(db.lancamentos.find(filtro_base))
+            lancamentos = list(db.lancamentos_completo.find(filtro_base))
             
             # Verifica se o cliente usa boleto
             usa_boleto = len(lancamentos) > 0
@@ -983,28 +1036,146 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
                 if numero not in lancamentos_por_numero or trans_id > lancamentos_por_numero[numero].get("trans_id", 0):
                     lancamentos_por_numero[numero] = lancamento
             
-            # Conta os lançamentos pagos em dia
+            # Conta os lançamentos pagos em dia e em diferentes prazos
             total_lancamentos = len(lancamentos_por_numero)
             pagos_em_dia = 0
+            pagos_em_ate_7d = 0
+            pagos_em_ate_15d = 0
+            pagos_em_ate_30d = 0
+            pagos_com_mais_30d = 0
+            total_a_vencer = 0  # Boletos que ainda não venceram
+            total_vencido = 0   # Boletos que venceram e não foram pagos
+            total_a_vencer_valor = 0  # Valor total dos títulos a vencer
+            
+            # Variáveis para calcular inadimplência
+            inadimplente_dias = 0  # Dias do título mais atrasado
+            inadimplente_valor = 0  # Valor total dos títulos vencidos
+            
+            # Data atual para comparar com datas de vencimento
+            from datetime import datetime
+            data_atual = datetime.now().timestamp()
             
             for lancamento in lancamentos_por_numero.values():
                 data_pagamento = lancamento.get("data_pagamento")
                 data_vencimento = lancamento.get("data_vencimento")
                 
-                # Um lançamento é considerado pago em dia se tem data de pagamento
-                # e essa data é menor ou igual à data de vencimento
-                if data_pagamento is not None and data_vencimento is not None and data_pagamento <= data_vencimento:
-                    pagos_em_dia += 1
+                # Obtém o valor do lançamento, verificando diferentes campos possíveis
+                valor_lancamento = lancamento.get("valor_liquido", 0)  # Prioriza valor_liquido
+                if valor_lancamento == 0:  # Se não encontrou, tenta outros campos
+                    valor_lancamento = lancamento.get("valor", 0)
+                if valor_lancamento == 0:  # Se ainda não encontrou, tenta outros campos
+                    valor_lancamento = lancamento.get("valor_titulo", 
+                                    lancamento.get("valor_total", 
+                                    lancamento.get("valor_parcela", 
+                                    lancamento.get("valor_lancamento", 
+                                    lancamento.get("valor_original", 0)))))
+                
+                # Ajusta a data de vencimento se cair em fim de semana
+                data_vencimento_ajustada = ajustar_data_vencimento(data_vencimento)
+                
+                # Verifica se o lançamento foi pago
+                if data_pagamento is not None and data_vencimento_ajustada is not None:
+                    # Calcula a diferença em dias entre o pagamento e o vencimento
+                    data_pag = datetime.fromtimestamp(data_pagamento)
+                    data_venc = datetime.fromtimestamp(data_vencimento_ajustada)
+                    diferenca_dias = (data_pag - data_venc).days
+                    
+                    # Classifica o pagamento de acordo com a diferença de dias
+                    if diferenca_dias <= 0:
+                        # Pago em dia (na data ou antes do vencimento)
+                        pagos_em_dia += 1
+                    elif 1 <= diferenca_dias <= 7:
+                        # Pago com 1 a 7 dias de atraso
+                        pagos_em_ate_7d += 1
+                    elif 8 <= diferenca_dias <= 15:
+                        # Pago com 8 a 15 dias de atraso
+                        pagos_em_ate_15d += 1
+                    elif 16 <= diferenca_dias <= 30:
+                        # Pago com 16 a 30 dias de atraso
+                        pagos_em_ate_30d += 1
+                    else:
+                        # Pago com mais de 30 dias de atraso
+                        pagos_com_mais_30d += 1
+                else:
+                    # Lançamento não foi pago, verifica se já venceu ou não
+                    if data_vencimento_ajustada is not None:
+                        if data_vencimento_ajustada < data_atual:
+                            # Já venceu e não foi pago
+                            total_vencido += 1
+                            
+                            # Calcula dias de atraso
+                            data_venc = datetime.fromtimestamp(data_vencimento_ajustada)
+                            data_atual_dt = datetime.fromtimestamp(data_atual)
+                            dias_atraso = (data_atual_dt - data_venc).days
+                            
+                            # Atualiza o maior atraso
+                            if dias_atraso > inadimplente_dias:
+                                inadimplente_dias = dias_atraso
+                            
+                            # Soma o valor do título vencido
+                            inadimplente_valor += valor_lancamento
+                        else:
+                            # Ainda não venceu
+                            total_a_vencer += 1
+                            total_a_vencer_valor += valor_lancamento
+                    else:
+                        # Se não tem data de vencimento, consideramos como a vencer
+                        total_a_vencer += 1
+                        total_a_vencer_valor += valor_lancamento
+            
+            # Calcula o total de pagamentos realizados
+            total_pagos = pagos_em_dia + pagos_em_ate_7d + pagos_em_ate_15d + pagos_em_ate_30d + pagos_com_mais_30d
+            
+            # Verifica se o total de lançamentos bate com a soma das categorias
+            total_calculado = total_pagos + total_a_vencer + total_vencido
+            if total_calculado != total_lancamentos:
+                print(f"AVISO: Total calculado ({total_calculado}) não corresponde ao total de lançamentos ({total_lancamentos})")
+            
+            # Calcula os percentuais em relação ao total de pagamentos (não ao total de lançamentos)
+            percentual_pagos_em_dia = round((pagos_em_dia / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_em_ate_7d = round((pagos_em_ate_7d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_em_ate_15d = round((pagos_em_ate_15d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_em_ate_30d = round((pagos_em_ate_30d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_com_mais_30d = round((pagos_com_mais_30d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            
+            # Calcula também os percentuais em relação ao total de lançamentos
+            percentual_pagos_total = round((total_pagos / total_lancamentos) * 100, 2) if total_lancamentos > 0 else 0
+            percentual_a_vencer = round((total_a_vencer / total_lancamentos) * 100, 2) if total_lancamentos > 0 else 0
+            percentual_vencido = round((total_vencido / total_lancamentos) * 100, 2) if total_lancamentos > 0 else 0
+            
+            # Determina se o cliente está inadimplente (tem títulos vencidos)
+            inadimplente = total_vencido > 0
             
             # Adiciona log para debug
-            print(f"    Cliente {cod_cliente}: {total_lancamentos} lançamentos, {pagos_em_dia} pagos em dia, usa boleto: {usa_boleto}")
+            print(f"    Cliente {cod_cliente}: {total_lancamentos} lançamentos, {total_pagos} pagos, {total_a_vencer} a vencer, {total_vencido} vencidos, {pagos_em_dia} pagos em dia, usa boleto: {usa_boleto}")
+            if inadimplente:
+                print(f"    Inadimplente: {inadimplente_dias} dias, R$ {inadimplente_valor:.2f}")
             
+            # Retorna os resultados
             return {
-                "codigo_cliente": cod_cliente,
                 "total_lancamentos": total_lancamentos,
+                "total_pagos": total_pagos,
+                "total_a_vencer": total_a_vencer,
+                "total_vencido": total_vencido,
+                "total_a_vencer_valor": total_a_vencer_valor,
+                "percentual_pagos_total": percentual_pagos_total,
+                "percentual_a_vencer": percentual_a_vencer,
+                "percentual_vencido": percentual_vencido,
+                "inadimplente": inadimplente,
+                "inadimplente_dias": inadimplente_dias if inadimplente else 0,
+                "inadimplente_valor": round(inadimplente_valor, 2) if inadimplente else 0,
+                "total_a_vencer_valor": total_a_vencer_valor,
+                "usa_boleto": usa_boleto,
                 "pagos_em_dia": pagos_em_dia,
-                "percentual_pagos_em_dia": round(pagos_em_dia / total_lancamentos * 100, 2) if total_lancamentos > 0 else 0,
-                "usa_boleto": usa_boleto
+                "percentual_pagos_em_dia": percentual_pagos_em_dia,
+                "pagos_em_ate_7d": pagos_em_ate_7d,
+                "percentual_pagos_em_ate_7d": percentual_pagos_em_ate_7d,
+                "pagos_em_ate_15d": pagos_em_ate_15d,
+                "percentual_pagos_em_ate_15d": percentual_pagos_em_ate_15d,
+                "pagos_em_ate_30d": pagos_em_ate_30d,
+                "percentual_pagos_em_ate_30d": percentual_pagos_em_ate_30d,
+                "pagos_com_mais_30d": pagos_com_mais_30d,
+                "percentual_pagos_com_mais_30d": percentual_pagos_com_mais_30d
             }
         
         # Se cliente_id/cod_cliente não for fornecido, calcula para todos os clientes
@@ -1014,7 +1185,7 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
             {"_id": 1, "cod_cliente": 1, "razao_social": 1}
         ))
         
-        # Para cada cliente, calcula o total de pedidos pagos em dia
+        # Para cada cliente, calcula o total de títulos pagos em dia
         resultados = []
         
         # Processa todos os clientes sem limitação
@@ -1027,7 +1198,7 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
             filtro_cliente = {**filtro_base, "cod_gerador": cod_cliente}
             
             # Busca todos os lançamentos do cliente
-            lancamentos = list(db.lancamentos.find(filtro_cliente))
+            lancamentos = list(db.lancamentos_completo.find(filtro_cliente))
             
             # Verifica se o cliente usa boleto
             usa_boleto = len(lancamentos) > 0
@@ -1041,30 +1212,148 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
                 if numero not in lancamentos_por_numero or trans_id > lancamentos_por_numero[numero].get("trans_id", 0):
                     lancamentos_por_numero[numero] = lancamento
             
-            # Conta os lançamentos pagos em dia
+            # Conta os lançamentos pagos em dia e em diferentes prazos
             total_lancamentos = len(lancamentos_por_numero)
             
             # Se não houver lançamentos, pula para o próximo cliente
             if total_lancamentos == 0:
                 continue
-                
+            
             pagos_em_dia = 0
+            pagos_em_ate_7d = 0
+            pagos_em_ate_15d = 0
+            pagos_em_ate_30d = 0
+            pagos_com_mais_30d = 0
+            total_a_vencer = 0  # Boletos que ainda não venceram
+            total_vencido = 0   # Boletos que venceram e não foram pagos
+            total_a_vencer_valor = 0  # Valor total dos títulos a vencer
+            
+            # Variáveis para calcular inadimplência
+            inadimplente_dias = 0  # Dias do título mais atrasado
+            inadimplente_valor = 0  # Valor total dos títulos vencidos
+            
+            # Data atual para comparar com datas de vencimento
+            from datetime import datetime
+            data_atual = datetime.now().timestamp()
             
             for lancamento in lancamentos_por_numero.values():
                 data_pagamento = lancamento.get("data_pagamento")
                 data_vencimento = lancamento.get("data_vencimento")
                 
-                if data_pagamento is not None and data_vencimento is not None and data_pagamento <= data_vencimento:
-                    pagos_em_dia += 1
+                # Obtém o valor do lançamento, verificando diferentes campos possíveis
+                valor_lancamento = lancamento.get("valor_liquido", 0)  # Prioriza valor_liquido
+                if valor_lancamento == 0:  # Se não encontrou, tenta outros campos
+                    valor_lancamento = lancamento.get("valor", 0)
+                if valor_lancamento == 0:  # Se ainda não encontrou, tenta outros campos
+                    valor_lancamento = lancamento.get("valor_titulo", 
+                                    lancamento.get("valor_total", 
+                                    lancamento.get("valor_parcela", 
+                                    lancamento.get("valor_lancamento", 
+                                    lancamento.get("valor_original", 0)))))
+                
+                # Ajusta a data de vencimento se cair em fim de semana
+                data_vencimento_ajustada = ajustar_data_vencimento(data_vencimento)
+                
+                # Verifica se o lançamento foi pago
+                if data_pagamento is not None and data_vencimento_ajustada is not None:
+                    # Calcula a diferença em dias entre o pagamento e o vencimento
+                    data_pag = datetime.fromtimestamp(data_pagamento)
+                    data_venc = datetime.fromtimestamp(data_vencimento_ajustada)
+                    diferenca_dias = (data_pag - data_venc).days
+                    
+                    # Classifica o pagamento de acordo com a diferença de dias
+                    if diferenca_dias <= 0:
+                        # Pago em dia (na data ou antes do vencimento)
+                        pagos_em_dia += 1
+                    elif 1 <= diferenca_dias <= 7:
+                        # Pago com 1 a 7 dias de atraso
+                        pagos_em_ate_7d += 1
+                    elif 8 <= diferenca_dias <= 15:
+                        # Pago com 8 a 15 dias de atraso
+                        pagos_em_ate_15d += 1
+                    elif 16 <= diferenca_dias <= 30:
+                        # Pago com 16 a 30 dias de atraso
+                        pagos_em_ate_30d += 1
+                    else:
+                        # Pago com mais de 30 dias de atraso
+                        pagos_com_mais_30d += 1
+                else:
+                    # Lançamento não foi pago, verifica se já venceu ou não
+                    if data_vencimento_ajustada is not None:
+                        if data_vencimento_ajustada < data_atual:
+                            # Já venceu e não foi pago
+                            total_vencido += 1
+                            
+                            # Calcula dias de atraso
+                            data_venc = datetime.fromtimestamp(data_vencimento_ajustada)
+                            data_atual_dt = datetime.fromtimestamp(data_atual)
+                            dias_atraso = (data_atual_dt - data_venc).days
+                            
+                            # Atualiza o maior atraso
+                            if dias_atraso > inadimplente_dias:
+                                inadimplente_dias = dias_atraso
+                            
+                            # Soma o valor do título vencido
+                            inadimplente_valor += valor_lancamento
+                        else:
+                            # Ainda não venceu
+                            total_a_vencer += 1
+                            total_a_vencer_valor += valor_lancamento
+                    else:
+                        # Se não tem data de vencimento, consideramos como a vencer
+                        total_a_vencer += 1
+                        total_a_vencer_valor += valor_lancamento
+            
+            # Calcula o total de pagamentos realizados
+            total_pagos = pagos_em_dia + pagos_em_ate_7d + pagos_em_ate_15d + pagos_em_ate_30d + pagos_com_mais_30d
+            
+            # Verifica se o total de lançamentos bate com a soma das categorias
+            total_calculado = total_pagos + total_a_vencer + total_vencido
+            if total_calculado != total_lancamentos:
+                print(f"AVISO: Total calculado ({total_calculado}) não corresponde ao total de lançamentos ({total_lancamentos})")
+            
+            # Calcula os percentuais em relação ao total de pagamentos (não ao total de lançamentos)
+            percentual_pagos_em_dia = round((pagos_em_dia / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_em_ate_7d = round((pagos_em_ate_7d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_em_ate_15d = round((pagos_em_ate_15d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_em_ate_30d = round((pagos_em_ate_30d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            percentual_pagos_com_mais_30d = round((pagos_com_mais_30d / total_pagos) * 100, 2) if total_pagos > 0 else 0
+            
+            # Calcula também os percentuais em relação ao total de lançamentos
+            percentual_pagos_total = round((total_pagos / total_lancamentos) * 100, 2) if total_lancamentos > 0 else 0
+            percentual_a_vencer = round((total_a_vencer / total_lancamentos) * 100, 2) if total_lancamentos > 0 else 0
+            percentual_vencido = round((total_vencido / total_lancamentos) * 100, 2) if total_lancamentos > 0 else 0
+            
+            # Determina se o cliente está inadimplente (tem títulos vencidos)
+            inadimplente = total_vencido > 0
             
             resultados.append({
                 "id": cliente.get("_id"),
                 "codigo_cliente": cod_cliente,
                 "nome": cliente.get("razao_social", ""),
                 "total_lancamentos": total_lancamentos,
+                "total_pagos": total_pagos,
+                "total_a_vencer": total_a_vencer,
+                "total_vencido": total_vencido,
+                "total_a_vencer_valor": total_a_vencer_valor,
+                "percentual_pagos_total": percentual_pagos_total,
+                "percentual_a_vencer": percentual_a_vencer,
+                "percentual_vencido": percentual_vencido,
+                "inadimplente": inadimplente,
+                "inadimplente_dias": inadimplente_dias if inadimplente else 0,
+                "inadimplente_valor": round(inadimplente_valor, 2) if inadimplente else 0,
+                "total_a_vencer_valor": total_a_vencer_valor,
+                "usa_boleto": usa_boleto,
                 "pagos_em_dia": pagos_em_dia,
-                "percentual_pagos_em_dia": round(pagos_em_dia / total_lancamentos * 100, 2) if total_lancamentos > 0 else 0,
-                "usa_boleto": usa_boleto
+                "percentual_pagos_em_dia": percentual_pagos_em_dia,
+                "pagos_em_ate_7d": pagos_em_ate_7d,
+                "percentual_pagos_em_ate_7d": percentual_pagos_em_ate_7d,
+                "pagos_em_ate_15d": pagos_em_ate_15d,
+                "percentual_pagos_em_ate_15d": percentual_pagos_em_ate_15d,
+                "pagos_em_ate_30d": pagos_em_ate_30d,
+                "percentual_pagos_em_ate_30d": percentual_pagos_em_ate_30d,
+                "pagos_com_mais_30d": pagos_com_mais_30d,
+                "percentual_pagos_com_mais_30d": percentual_pagos_com_mais_30d
             })
         
         # Ordena os resultados pelo percentual de pagamentos em dia (do maior para o menor)
@@ -1073,7 +1362,7 @@ def obter_pedidos_pagos_em_dia(db, cliente_id=None, cod_cliente=None):
         return resultados
     
     except Exception as e:
-        print(f"Erro ao calcular pedidos pagos em dia: {e}")
+        print(f"Erro ao calcular títulos pagos em dia: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -1173,15 +1462,35 @@ def integrar_todas_consultas(db, limite_clientes=None, tamanho_lote=20, usar_cac
                         "devolvidas": 0,
                         "liquido": 0
                     },
-                    "pedidos_pagos_em_dia": {
+                    "titulos_pagos_em_dia": {
                         "total_lancamentos": 0,
+                        "total_pagos": 0,
+                        "total_a_vencer": 0,
+                        "total_vencido": 0,
+                        "percentual_pagos_total": 0,
+                        "percentual_a_vencer": 0,
+                        "percentual_vencido": 0,
+                        "inadimplente": False,
+                        "inadimplente_dias": 0,
+                        "inadimplente_valor": 0,
+                        "total_a_vencer_valor": 0,
+                        "usa_boleto": False,
                         "pagos_em_dia": 0,
                         "percentual_pagos_em_dia": 0,
-                        "usa_boleto": False
+                        "pagos_em_ate_7d": 0,
+                        "percentual_pagos_em_ate_7d": 0,
+                        "pagos_em_ate_15d": 0,
+                        "percentual_pagos_em_ate_15d": 0,
+                        "pagos_em_ate_30d": 0,
+                        "percentual_pagos_em_ate_30d": 0,
+                        "pagos_com_mais_30d": 0,
+                        "percentual_pagos_com_mais_30d": 0
                     },
                     "valor_por_marca": {},
                     "numero_marcas_diferentes": 0,
-                    "lista_marcas": []
+                    "lista_marcas": [],
+                    "limite_credito": 0,
+                    "limite_credito_utilizado": 0
                 }
                 
                 # Consulta 3: Data da primeira compra
@@ -1190,7 +1499,7 @@ def integrar_todas_consultas(db, limite_clientes=None, tamanho_lote=20, usar_cac
                 if data_primeira_compra:
                     resultado_cliente["data_primeira_compra"] = data_primeira_compra.get("data_formatada")
                     resultado_cliente["data_primeira_compra_timestamp"] = data_primeira_compra.get("data")
-                    resultado_cliente["romaneio_primeira_compra"] = data_primeira_compra.get("romaneio")
+                    resultado_cliente["data_ultima_compra_timestamp"] = data_primeira_compra.get("data_ultima_compra")
                 
                 # Consulta 4: Faturamento total nos últimos 12 meses
                 print("    Calculando faturamento...")
@@ -1220,15 +1529,45 @@ def integrar_todas_consultas(db, limite_clientes=None, tamanho_lote=20, usar_cac
                         "liquido": pecas.get("total_liquido", 0)
                     }
                 
-                # Consulta 7: Total de pedidos pagos em dia
-                print("    Calculando pedidos pagos em dia...")
-                pagamentos = obter_pedidos_pagos_em_dia(db, cliente_id=cliente_id)
+                # Consulta 7: Total de títulos pagos em dia
+                print("    Calculando títulos pagos em dia...")
+                pagamentos = obter_titulos_pagos_em_dia(db, cliente_id=cliente_id)
+                
+                # Adiciona informações sobre limite de crédito
+                cliente_obj = db.geradores.find_one({"_id": cliente_id})
+                limite_credito = cliente_obj.get("limite_credito", 0) if cliente_obj else 0
+                
                 if pagamentos:
-                    resultado_cliente["pedidos_pagos_em_dia"] = {
+                    # Calcula o limite de crédito utilizado (total_a_vencer_valor + inadimplente_valor)
+                    limite_credito_utilizado = pagamentos.get("total_a_vencer_valor", 0) + pagamentos.get("inadimplente_valor", 0)
+                    
+                    # Adiciona os campos ao resultado do cliente
+                    resultado_cliente["limite_credito"] = limite_credito
+                    resultado_cliente["limite_credito_utilizado"] = limite_credito_utilizado
+                    
+                    resultado_cliente["titulos_pagos_em_dia"] = {
                         "total_lancamentos": pagamentos.get("total_lancamentos", 0),
+                        "total_pagos": pagamentos.get("total_pagos", 0),
+                        "total_a_vencer": pagamentos.get("total_a_vencer", 0),
+                        "total_vencido": pagamentos.get("total_vencido", 0),
+                        "percentual_pagos_total": pagamentos.get("percentual_pagos_total", 0),
+                        "percentual_a_vencer": pagamentos.get("percentual_a_vencer", 0),
+                        "percentual_vencido": pagamentos.get("percentual_vencido", 0),
+                        "inadimplente": pagamentos.get("inadimplente", False),
+                        "inadimplente_dias": pagamentos.get("inadimplente_dias", 0),
+                        "inadimplente_valor": round(pagamentos.get("inadimplente_valor", 0), 2),
+                        "total_a_vencer_valor": pagamentos.get("total_a_vencer_valor", 0),
+                        "usa_boleto": pagamentos.get("usa_boleto", False),
                         "pagos_em_dia": pagamentos.get("pagos_em_dia", 0),
                         "percentual_pagos_em_dia": pagamentos.get("percentual_pagos_em_dia", 0),
-                        "usa_boleto": pagamentos.get("usa_boleto", False)
+                        "pagos_em_ate_7d": pagamentos.get("pagos_em_ate_7d", 0),
+                        "percentual_pagos_em_ate_7d": pagamentos.get("percentual_pagos_em_ate_7d", 0),
+                        "pagos_em_ate_15d": pagamentos.get("pagos_em_ate_15d", 0),
+                        "percentual_pagos_em_ate_15d": pagamentos.get("percentual_pagos_em_ate_15d", 0),
+                        "pagos_em_ate_30d": pagamentos.get("pagos_em_ate_30d", 0),
+                        "percentual_pagos_em_ate_30d": pagamentos.get("percentual_pagos_em_ate_30d", 0),
+                        "pagos_com_mais_30d": pagamentos.get("pagos_com_mais_30d", 0),
+                        "percentual_pagos_com_mais_30d": pagamentos.get("percentual_pagos_com_mais_30d", 0)
                     }
                 
                 # Consulta 8: Valor total comprado por marca
@@ -1306,7 +1645,7 @@ def testar_integracao_consultas():
     # Lista para armazenar os resultados
     resultados = []
     
-    # Processa cada cliente específico
+    # Processa cada cliente de teste
     for cod_cliente in clientes_teste:
         print(f"Processando cliente: {cod_cliente}")
         cliente = db.geradores.find_one({"cod_cliente": cod_cliente})
@@ -1345,14 +1684,16 @@ def testar_integracao_consultas():
             total_pecas = resultado.get('total_pecas', {})
             print(f"   Total de peças: {total_pecas.get('liquido', 0)}")
             
-            # Pedidos pagos em dia
-            pedidos = resultado.get('pedidos_pagos_em_dia', {})
-            pagos = pedidos.get('pagos_em_dia', 0)
-            total = pedidos.get('total_lancamentos', 0)
-            percentual = pedidos.get('percentual_pagos_em_dia', 0)
-            usa_boleto = pedidos.get('usa_boleto', False)
-            print(f"   Pedidos pagos em dia: {pagos} de {total} ({percentual}%)")
+            # Títulos pagos em dia
+            pagamentos = resultado.get('titulos_pagos_em_dia', {})
+            pagos_em_dia = pagamentos.get('pagos_em_dia', 0)
+            total_lancamentos = pagamentos.get('total_lancamentos', 0)
+            percentual_pagos_em_dia = pagamentos.get('percentual_pagos_em_dia', 0)
+            usa_boleto = pagamentos.get('usa_boleto', False)
+            inadimplente = pagamentos.get('inadimplente', False)
+            print(f"   Títulos pagos em dia: {pagos_em_dia} de {total_lancamentos} ({percentual_pagos_em_dia}%)")
             print(f"   Usa boleto: {usa_boleto}")
+            print(f"   Inadimplente: {inadimplente}")
             
             # Número de marcas
             num_marcas = resultado.get('numero_marcas_diferentes', 0)

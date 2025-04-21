@@ -11,7 +11,7 @@ from consultas import (
     obter_faturamento_ultimos_12_meses,
     obter_ciclos_compra_ultimos_6_meses,
     obter_total_pecas_compradas,
-    obter_pedidos_pagos_em_dia,
+    obter_titulos_pagos_em_dia,
     obter_valor_por_marca,
     obter_numero_marcas_diferentes
 )
@@ -66,7 +66,6 @@ def testar_cliente_especifico():
     if data_primeira_compra:
         print(f"   Data: {data_primeira_compra.get('data_formatada')}")
         print(f"   Timestamp: {data_primeira_compra.get('data')}")
-        print(f"   Romaneio: {data_primeira_compra.get('romaneio')}")
     else:
         print("   Nenhuma compra encontrada.")
     
@@ -101,12 +100,40 @@ def testar_cliente_especifico():
         print("   Nenhuma peça comprada encontrada.")
     
     # Consulta 5: Total de pedidos pagos em dia
-    print("\n5. Pedidos pagos em dia:")
-    pagamentos = obter_pedidos_pagos_em_dia(db, cod_cliente=CLIENTE_TESTE)
+    print("\n5. Títulos pagos em dia:")
+    pagamentos = obter_titulos_pagos_em_dia(db, cod_cliente=CLIENTE_TESTE)
     if pagamentos:
         print(f"   Total de lançamentos: {pagamentos.get('total_lancamentos', 0)}")
-        print(f"   Pagos em dia: {pagamentos.get('pagos_em_dia', 0)}")
-        print(f"   Percentual: {pagamentos.get('percentual_pagos_em_dia', 0)}%")
+        print(f"   Total de pagamentos realizados: {pagamentos.get('total_pagos', 0)} ({pagamentos.get('percentual_pagos_total', 0)}%)")
+        print(f"   Total a vencer: {pagamentos.get('total_a_vencer', 0)} ({pagamentos.get('percentual_a_vencer', 0)}%)")
+        print(f"   Total vencido: {pagamentos.get('total_vencido', 0)} ({pagamentos.get('percentual_vencido', 0)}%)")
+        
+        # Exibe informações de inadimplência se o cliente estiver inadimplente
+        if pagamentos.get('inadimplente', False):
+            print(f"   Inadimplente: True")
+            print(f"     - Dias de atraso: {pagamentos.get('inadimplente_dias', 0)}")
+            print(f"     - Valor vencido: R$ {pagamentos.get('inadimplente_valor', 0):.2f}")
+        else:
+            print(f"   Inadimplente: False")
+        
+        # Exibe valor total a vencer
+        print(f"   Valor total a vencer: R$ {pagamentos.get('total_a_vencer_valor', 0):.2f}")
+        
+        print("   Dos pagamentos realizados:")
+        print(f"     - Pagos em dia: {pagamentos.get('pagos_em_dia', 0)} ({pagamentos.get('percentual_pagos_em_dia', 0)}%)")
+        print(f"     - Pagos com 1-7 dias de atraso: {pagamentos.get('pagos_em_ate_7d', 0)} ({pagamentos.get('percentual_pagos_em_ate_7d', 0)}%)")
+        print(f"     - Pagos com 8-15 dias de atraso: {pagamentos.get('pagos_em_ate_15d', 0)} ({pagamentos.get('percentual_pagos_em_ate_15d', 0)}%)")
+        print(f"     - Pagos com 16-30 dias de atraso: {pagamentos.get('pagos_em_ate_30d', 0)} ({pagamentos.get('percentual_pagos_em_ate_30d', 0)}%)")
+        print(f"     - Pagos com mais de 30 dias de atraso: {pagamentos.get('pagos_com_mais_30d', 0)} ({pagamentos.get('percentual_pagos_com_mais_30d', 0)}%)")
+        print(f"   Usa boleto: {pagamentos.get('usa_boleto', False)}")
+        
+        # Adiciona informações sobre limite de crédito
+        limite_credito = cliente.get("limite_credito", 0)
+        limite_credito_utilizado = pagamentos.get("total_a_vencer_valor", 0) + pagamentos.get("inadimplente_valor", 0)
+        
+        print(f"   Limite de crédito: R$ {limite_credito:.2f}")
+        print(f"   Limite utilizado: R$ {limite_credito_utilizado:.2f}")
+        print(f"   Disponível: R$ {max(0, limite_credito - limite_credito_utilizado):.2f}")
     else:
         print("   Nenhum pagamento encontrado.")
     
@@ -144,6 +171,8 @@ def testar_cliente_especifico():
         "codigo_cliente": CLIENTE_TESTE,
         "nome_completo": nome_cliente,
         "data_primeira_compra": data_primeira_compra.get("data_formatada") if data_primeira_compra else None,
+        "data_primeira_compra_timestamp": data_primeira_compra.get("data") if data_primeira_compra else None,
+        "data_ultima_compra_timestamp": data_primeira_compra.get("data_ultima_compra") if data_primeira_compra else None,
         "faturamento_ultimos_12_meses": {
             "total_vendas": faturamento.get("total_vendas", 0) if faturamento else 0,
             "total_devolucoes": faturamento.get("total_devolucoes", 0) if faturamento else 0,
@@ -157,11 +186,31 @@ def testar_cliente_especifico():
             "devolvidas": pecas.get("total_devolucoes", 0) if pecas else 0,
             "liquido": pecas.get("total_liquido", 0) if pecas else 0
         },
-        "pedidos_pagos_em_dia": {
+        "titulos_pagos_em_dia": {
             "total_lancamentos": pagamentos.get("total_lancamentos", 0) if pagamentos else 0,
+            "total_pagos": pagamentos.get("total_pagos", 0) if pagamentos else 0,
+            "total_a_vencer": pagamentos.get("total_a_vencer", 0) if pagamentos else 0,
+            "total_vencido": pagamentos.get("total_vencido", 0) if pagamentos else 0,
+            "percentual_pagos_total": pagamentos.get("percentual_pagos_total", 0) if pagamentos else 0,
+            "percentual_a_vencer": pagamentos.get("percentual_a_vencer", 0) if pagamentos else 0,
+            "percentual_vencido": pagamentos.get("percentual_vencido", 0) if pagamentos else 0,
             "pagos_em_dia": pagamentos.get("pagos_em_dia", 0) if pagamentos else 0,
             "percentual_pagos_em_dia": pagamentos.get("percentual_pagos_em_dia", 0) if pagamentos else 0,
-            "usa_boleto": pagamentos.get("usa_boleto", False) if pagamentos else False
+            "pagos_em_ate_7d": pagamentos.get("pagos_em_ate_7d", 0) if pagamentos else 0,
+            "percentual_pagos_em_ate_7d": pagamentos.get("percentual_pagos_em_ate_7d", 0) if pagamentos else 0,
+            "pagos_em_ate_15d": pagamentos.get("pagos_em_ate_15d", 0) if pagamentos else 0,
+            "percentual_pagos_em_ate_15d": pagamentos.get("percentual_pagos_em_ate_15d", 0) if pagamentos else 0,
+            "pagos_em_ate_30d": pagamentos.get("pagos_em_ate_30d", 0) if pagamentos else 0,
+            "percentual_pagos_em_ate_30d": pagamentos.get("percentual_pagos_em_ate_30d", 0) if pagamentos else 0,
+            "pagos_com_mais_30d": pagamentos.get("pagos_com_mais_30d", 0) if pagamentos else 0,
+            "percentual_pagos_com_mais_30d": pagamentos.get("percentual_pagos_com_mais_30d", 0) if pagamentos else 0,
+            "inadimplente": pagamentos.get("inadimplente", False) if pagamentos else False,
+            "inadimplente_dias": pagamentos.get("inadimplente_dias", 0) if pagamentos else 0,
+            "inadimplente_valor": pagamentos.get("inadimplente_valor", 0) if pagamentos else 0,
+            "total_a_vencer_valor": pagamentos.get("total_a_vencer_valor", 0) if pagamentos else 0,
+            "usa_boleto": pagamentos.get("usa_boleto", False) if pagamentos else False,
+            "limite_credito": cliente.get("limite_credito", 0),
+            "limite_credito_utilizado": pagamentos.get("total_a_vencer_valor", 0) + pagamentos.get("inadimplente_valor", 0)
         },
         "valor_por_marca": valor_marcas.get("valor_por_marca", {}) if valor_marcas else {},
         "numero_marcas_diferentes": marcas.get("total_marcas", 0) if marcas else 0,
