@@ -4,7 +4,7 @@
 
 ![ClientInsight Banner](banner.svg)
 
-![Version](https://img.shields.io/badge/versão-1.2.0-blue)
+![Version](https://img.shields.io/badge/versão-1.3.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.12+-yellow?logo=python)
 ![MongoDB](https://img.shields.io/badge/MongoDB-4.4+-green?logo=mongodb)
 ![Linx](https://img.shields.io/badge/Linx-e--Millennium-red)
@@ -17,7 +17,7 @@
 
 Este sistema analisa o comportamento de compra dos clientes e cria um sistema de classificação baseado em indicadores de desempenho. O objetivo é categorizar os clientes em diferentes níveis com base em seus padrões de compra, fidelidade e valor.
 
-O **ClientInsight** integra-se com o MongoDB para extrair dados transacionais e de cadastro, processando-os para gerar insights valiosos sobre o comportamento dos clientes.
+O **ClientInsight** integra-se com o MongoDB para extrair dados transacionais e de cadastro, processando-os para gerar insights valiosos sobre o comportamento dos clientes. Além disso, o sistema exporta os resultados para a collection **ClientInsight** no MongoDB, utilizando o código do cliente como chave única para evitar duplicidades.
 
 ### ✨ Benefícios
 
@@ -67,12 +67,15 @@ CLIENTE_TESTE=0000000826
 
 # Configurações de processamento
 PROCESSAR_TODOS=false
-TAMANHO_LOTE=20
+TAMANHO_LOTE=500
 USAR_CACHE=false
 
 # Configurações de processamento paralelo
-USAR_PARALELO=true
+USAR_PARALELO=false
 NUM_THREADS=4
+
+# Configurações de log
+MOSTRAR_LOGS=false
 ```
 
 ### 🔄 Modos de Execução
@@ -82,7 +85,14 @@ NUM_THREADS=4
 Para processar todos os clientes e gerar a classificação completa:
 
 1. Defina `PROCESSAR_TODOS=true` no arquivo `.env`
-2. Execute: `python main.py`
+2. Ajuste o `TAMANHO_LOTE` para controlar quantos clientes são processados antes do envio ao MongoDB
+3. Execute: `python main.py`
+
+Cada lote de clientes será:
+- Processado sequencialmente
+- Salvo em um arquivo JSON temporário
+- Enviado para a collection ClientInsight no MongoDB (usando o código do cliente como chave única)
+- Após o processamento completo, os arquivos temporários serão removidos
 
 #### 🚀 Processamento Paralelo
 
@@ -97,6 +107,14 @@ Para analisar um cliente específico:
 
 1. Defina o código do cliente em `CLIENTE_TESTE` no arquivo `.env`
 2. Execute: `python main.py`
+
+#### 🔄 Exportação para MongoDB
+
+O sistema agora exporta automaticamente os resultados para o MongoDB:
+
+1. A collection `ClientInsight` é limpa apenas antes do primeiro lote de envio
+2. Os dados são inseridos usando o código do cliente como chave única, evitando duplicidades
+3. Para exportar resultados manualmente, execute: `python enviar_para_mongodb.py`
 
 ## 📂 Arquivos de Saída
 
@@ -195,11 +213,15 @@ Abaixo está um exemplo do resultado da análise para um cliente:
 - **🔍 Filtragem Inteligente**: Processamento apenas de clientes com movimentações reais
 - **📅 Ajuste de Datas**: Consideração de finais de semana e feriados nacionais para datas de vencimento
 - **💰 Validação de Transações**: Filtragem de operações inválidas ou canceladas
+- **🔄 Exportação para MongoDB**: Envio dos resultados para uma collection no MongoDB
+- **🔑 Chave Única**: Uso do código do cliente como chave única para evitar duplicidades
+- **🧹 Limpeza Automática**: Remoção de arquivos temporários após o processamento completo
 
 ### 📁 Estrutura do Projeto
 
 - `main.py`: Script principal com implementação do processamento
 - `processar_paralelo.py`: Script para processamento paralelo de clientes
+- `enviar_para_mongodb.py`: Script para enviar resultados para o MongoDB
 - `consultas/`: Pacote com módulos de consultas específicas
   - `__init__.py`: Inicialização do pacote
   - `base.py`: Funções e constantes base compartilhadas
@@ -207,6 +229,7 @@ Abaixo está um exemplo do resultado da análise para um cliente:
   - `faturamento.py`: Análise de faturamento
   - `pecas_compradas.py`: Contagem de peças
   - `titulos_pagos.py`: Análise de títulos e pagamentos
+  - `valor_por_marca.py`: Análise de valor por marca e contagem de marcas diferentes
 
 ## 📄 Licença
 
