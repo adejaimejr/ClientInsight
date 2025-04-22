@@ -22,6 +22,12 @@ from consultas.valor_por_marca import obter_valor_por_marca, obter_numero_marcas
 from consultas.data_primeira_compra import obter_data_primeira_compra
 from consultas.cliente import obter_codigo_cliente, obter_nome_completo
 
+# Importa a funcionalidade de classificação
+from classificacao.classificar import classificar_cliente
+
+# Importa o módulo de envio para MongoDB
+import enviar_para_mongodb
+
 # Carrega as variáveis de ambiente
 load_dotenv()
 
@@ -230,8 +236,29 @@ def processar_cliente_individual(db, cliente_id, usar_cache=True):
     log("Calculando número de marcas diferentes...", nivel=2)
     marcas = obter_numero_marcas_diferentes(db, cliente_id=cliente_id)
     if marcas:
-        resultado_cliente["numero_marcas_diferentes"] = marcas.get("numero_marcas", 0)
+        resultado_cliente["numero_marcas_diferentes"] = marcas.get("total_marcas", 0)
         resultado_cliente["lista_marcas"] = marcas.get("lista_marcas", [])
+    
+    # NOVA FUNCIONALIDADE: Realiza a classificação do cliente
+    log(f"  Classificando cliente {cod_cliente} - {nome_cliente}...", nivel=2)
+    try:
+        resultado_classificacao = classificar_cliente(resultado_cliente)
+        
+        # Adiciona a categoria diretamente ao nível principal do resultado
+        resultado_cliente["categoria"] = resultado_classificacao["categoria"]
+        
+        # Adiciona os detalhes completos da classificação
+        resultado_cliente["classificacao"] = resultado_classificacao
+        
+        log(f"  Classificação concluída: {resultado_classificacao['categoria']} ({resultado_classificacao['pontuacao_final']})", nivel=2)
+    except Exception as e:
+        log(f"  [ERRO] Falha ao classificar cliente: {str(e)}", nivel=2)
+        resultado_cliente["categoria"] = "Bronze"
+        resultado_cliente["classificacao"] = {
+            "erro": str(e),
+            "categoria": "Bronze",
+            "pontuacao_final": 0
+        }
     
     return resultado_cliente
 
@@ -240,83 +267,141 @@ def main():
     try:
         # Conecta ao MongoDB
         db = conectar_mongodb()
+        
         if db is None:
-            log("Falha ao conectar ao banco de dados MongoDB.", sempre_mostrar=True)
+            log("Não foi possível estabelecer conexão com o MongoDB.", sempre_mostrar=True)
             return
         
-        # Cria o diretório de resultados se não existir
-        if not os.path.exists("resultados"):
-            os.makedirs("resultados")
-        
+        # Se processar todos, faz a consulta para todos os clientes
         if PROCESSAR_TODOS:
-            log("Processando todos os clientes...", sempre_mostrar=True)
+            log("Processando todos os clientes com movimentações...", sempre_mostrar=True)
             
-            # Obtém lista de clientes com movimentações
+            # Obtém a lista completa de clientes com movimentações
+            log("Obtendo lista de clientes com movimentações...")
             clientes_com_movimentacao = obter_clientes_com_movimentacao(db)
             
             if clientes_com_movimentacao:
-                log(f"Total de clientes com movimentações: {len(clientes_com_movimentacao)}", sempre_mostrar=True)
-                
                 # Converte o conjunto em lista para permitir fatiamento
-                codigos_clientes = list(clientes_com_movimentacao)
+                clientes_com_movimentacao = list(clientes_com_movimentacao)
+                total_clientes = len(clientes_com_movimentacao)
+                log(f"Total de clientes com movimentações: {total_clientes}", sempre_mostrar=True)
                 
-                # Divide em lotes para processamento mais eficiente
-                total_clientes = len(codigos_clientes)
-                num_lotes = (total_clientes + TAMANHO_LOTE - 1) // TAMANHO_LOTE
+                # Cria o diretório de resultados se não existir
+                os.makedirs("resultados", exist_ok=True)
+                os.makedirs("resultados/lotes", exist_ok=True)
                 
+                # Processa os clientes em lotes
                 resultados_totais = []
-                total_clientes_processados = 0
+                lote_atual = 1
+                primeiro_lote = True
                 
-                for i in range(num_lotes):
-                    inicio = i * TAMANHO_LOTE
-                    fim = min((i + 1) * TAMANHO_LOTE, total_clientes)
+                for i in range(0, total_clientes, TAMANHO_LOTE):
+                    # Define o lote atual
+                    codigos_clientes_lote = clientes_com_movimentacao[i:i+TAMANHO_LOTE]
+                    total_no_lote = len(codigos_clientes_lote)
                     
-                    log(f"Processando lote {i+1}/{num_lotes} ({inicio+1}-{fim} de {total_clientes})...", sempre_mostrar=True)
+                    log(f"Processando lote {lote_atual} ({total_no_lote} clientes)...", sempre_mostrar=True)
                     
-                    lote_atual = codigos_clientes[inicio:fim]
+                    # Lista para armazenar os resultados do lote atual
                     resultados_lote = []
                     
-                    for j, cod_cliente in enumerate(lote_atual):
+                    # Contador para acompanhar o progresso no lote
+                    contador = 0
+                    
+                    # Processa cada cliente no lote atual
+                    for cod_cliente in codigos_clientes_lote:
                         # Busca informações completas do cliente pelo código
                         cliente = db.geradores.find_one({"cod_cliente": cod_cliente})
                         if not cliente:
-                            log(f"Cliente com código {cod_cliente} não encontrado no banco de dados.")
+                            log(f"Cliente com código {cod_cliente} não encontrado no banco.")
+                            contador += 1
                             continue
                             
                         cliente_id = cliente["_id"]
                         nome_cliente = cliente.get("razao_social", "")
                         
-                        # Incrementa o contador total de clientes processados
-                        total_clientes_processados += 1
+                        log(f"Processando cliente {contador+1}/{total_no_lote} do lote {lote_atual}: {cod_cliente} - {nome_cliente}")
                         
-                        # Log detalhado (apenas se MOSTRAR_LOGS=true)
-                        log(f"Processando cliente {j+1}/{len(lote_atual)}: {cod_cliente} - {nome_cliente}")
+                        try:
+                            resultado = processar_cliente_individual(db, cliente_id, usar_cache=USAR_CACHE)
+                            if resultado:
+                                resultados_lote.append(resultado)
+                                resultados_totais.append(resultado)
+                        except Exception as e:
+                            log(f"Erro ao processar cliente {cod_cliente}: {e}")
+                            log(traceback.format_exc())
                         
-                        # Log mínimo (sempre mostra independente de MOSTRAR_LOGS)
-                        if total_clientes_processados % 50 == 0 or j == 0:  # A cada 50 clientes ou no início do lote
-                            log(f"Processando cliente {total_clientes_processados}/{total_clientes}", sempre_mostrar=True)
+                        contador += 1
                         
-                        resultado = processar_cliente_individual(db, cliente_id)
-                        if resultado:
-                            resultados_lote.append(resultado)
+                        # Exibe progresso a cada 10 clientes
+                        if contador % 10 == 0 or contador == total_no_lote:
+                            percentual_lote = (contador / total_no_lote) * 100
+                            percentual_total = ((i + contador) / total_clientes) * 100
+                            log(f"Progresso: {contador}/{total_no_lote} clientes no lote ({percentual_lote:.1f}%) | " + 
+                                f"Total: {i+contador}/{total_clientes} ({percentual_total:.1f}%)", sempre_mostrar=True)
                     
-                    # Salva resultados parciais do lote
-                    nome_arquivo_lote = f"resultados/resultados_parciais_lote_{i+1}.json"
+                    # Salva os resultados do lote atual em um arquivo JSON
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    nome_arquivo_lote = f"resultados/lotes/resultado_lote_{lote_atual}_{timestamp}.json"
+                    
                     with open(nome_arquivo_lote, "w", encoding="utf-8") as f:
                         json.dump(resultados_lote, f, default=json_util.default, ensure_ascii=False, indent=2)
                     
-                    log(f"Resultados parciais do lote {i+1} salvos em '{nome_arquivo_lote}'")
+                    log(f"Resultados do lote {lote_atual} salvos em '{nome_arquivo_lote}'", sempre_mostrar=True)
+                    log(f"Total de clientes processados no lote {lote_atual}: {len(resultados_lote)}", sempre_mostrar=True)
                     
-                    # Adiciona aos resultados totais
-                    resultados_totais.extend(resultados_lote)
+                    # Envia os resultados do lote para o MongoDB
+                    log(f"Enviando resultados do lote {lote_atual} para o MongoDB...", sempre_mostrar=True)
+                    diretorio_lote = os.path.dirname(nome_arquivo_lote)
+                    limpar_collection = primeiro_lote  # Limpa apenas no primeiro lote
+                    
+                    # Chama a função de envio para MongoDB e aguarda a conclusão
+                    envio_sucesso = enviar_para_mongodb.main(
+                        limpar_collection_antes=limpar_collection, 
+                        diretorio_resultados=diretorio_lote
+                    )
+                    
+                    if envio_sucesso:
+                        log(f"Lote {lote_atual} enviado com sucesso para o MongoDB.", sempre_mostrar=True)
+                    else:
+                        log(f"Erro ao enviar lote {lote_atual} para o MongoDB. Interrompendo processamento.", sempre_mostrar=True)
+                        # Se o envio falhar, interrompe o processamento
+                        break
+                    
+                    # Incrementa o contador de lotes e marca que não é mais o primeiro lote
+                    lote_atual += 1
+                    primeiro_lote = False
+                    
+                    # Aguarda um momento antes de iniciar o próximo lote para não sobrecarregar o sistema
+                    log(f"Aguardando 2 segundos antes de iniciar o próximo lote...", sempre_mostrar=True)
+                    time.sleep(2)
                 
-                # Salva resultados completos
-                nome_arquivo_completo = "resultados/resultados_completos.json"
+                # Após processar todos os lotes, salva o resultado completo em um único arquivo
+                timestamp_final = datetime.now().strftime("%Y%m%d_%H%M%S")
+                nome_arquivo_completo = f"resultados/resultado_completo_{timestamp_final}.json"
+                
                 with open(nome_arquivo_completo, "w", encoding="utf-8") as f:
                     json.dump(resultados_totais, f, default=json_util.default, ensure_ascii=False, indent=2)
                 
                 log(f"Resultados completos salvos em '{nome_arquivo_completo}'", sempre_mostrar=True)
                 log(f"Total de clientes processados: {len(resultados_totais)}", sempre_mostrar=True)
+                
+                # Apaga os arquivos de lotes temporários
+                try:
+                    log("Removendo arquivos de lotes temporários...", sempre_mostrar=True)
+                    arquivos_lote = glob.glob(os.path.join("resultados/lotes", "resultado_lote_*.json"))
+                    contador_removidos = 0
+                    
+                    for arquivo in arquivos_lote:
+                        try:
+                            os.remove(arquivo)
+                            contador_removidos += 1
+                        except Exception as e:
+                            log(f"Erro ao remover arquivo {arquivo}: {e}")
+                    
+                    log(f"Foram removidos {contador_removidos} arquivos de lotes temporários", sempre_mostrar=True)
+                except Exception as e:
+                    log(f"Erro ao remover arquivos de lotes: {e}", sempre_mostrar=True)
             
             else:
                 log("Nenhum cliente com movimentações encontrado.", sempre_mostrar=True)
@@ -339,6 +424,10 @@ def main():
                 if resultado:
                     # Gera um timestamp para o nome do arquivo
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    
+                    # Cria o diretório de resultados se não existir
+                    os.makedirs("resultados", exist_ok=True)
+                    
                     nome_arquivo = f"resultados/resultado_{CLIENTE_TESTE}_{timestamp}.json"
                     
                     with open(nome_arquivo, "w", encoding="utf-8") as f:
@@ -359,6 +448,20 @@ def main():
                         log(f"  Total de peças compradas: {total_pecas}")
                         log(f"   Número de marcas diferentes: {marcas_diferentes}")
                         log(f"   Marcas: {', '.join(lista_marcas)}")
+                    
+                    # Envia o resultado para o MongoDB
+                    log(f"Enviando resultado para o MongoDB...", sempre_mostrar=True)
+                    
+                    # Chama a função de envio para MongoDB
+                    envio_sucesso = enviar_para_mongodb.main(
+                        limpar_collection_antes=True, 
+                        diretorio_resultados="resultados"
+                    )
+                    
+                    if envio_sucesso:
+                        log(f"Resultado enviado com sucesso para o MongoDB.", sempre_mostrar=True)
+                    else:
+                        log(f"Erro ao enviar resultado para o MongoDB.", sempre_mostrar=True)
                 
                 else:
                     log(f"Não foi possível processar o cliente {CLIENTE_TESTE}.", sempre_mostrar=True)

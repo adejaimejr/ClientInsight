@@ -96,6 +96,93 @@ Este documento fornece uma explicação detalhada de cada campo presente no JSON
 | `numero_marcas_diferentes` | Number | Número total de marcas diferentes que o cliente comprou. |
 | `lista_marcas` | Array | Lista dos nomes de todas as marcas adquiridas pelo cliente. |
 
+## Classificação de Clientes
+
+O sistema ClientInsight agora inclui um algoritmo de classificação de clientes que categoriza cada cliente em quatro níveis: Diamante, Ouro, Prata e Bronze. A classificação é baseada em cinco critérios principais:
+
+### Critérios e Pesos
+
+| Critério | Descrição | Peso |
+|----------|-----------|------|
+| Faturamento Líquido | Valor líquido faturado nos últimos 12 meses | 40% |
+| Frequência de Compras | Número de meses com compra nos últimos 6 meses | 25% |
+| Pontualidade de Pagamentos | Percentual de títulos pagos em dia ou com atraso mínimo | 15% |
+| Volume Líquido de Peças | Quantidade líquida de peças adquiridas (compras - devoluções) | 10% |
+| Diversificação por Marcas | Número de marcas distintas adquiridas | 10% |
+
+### Categorias
+
+- **Diamante** (9.1 a 10 pontos): Clientes de alto volume, frequência exemplar e excelente pontualidade.
+- **Ouro** (7.5 a 9.0 pontos): Clientes frequentes e fiéis, com bom volume de compras.
+- **Prata** (5.0 a 7.4 pontos): Clientes recorrentes com volume médio de compras.
+- **Bronze** (abaixo de 5.0 pontos): Clientes eventuais ou novatos.
+
+### Estrutura do JSON de Classificação
+
+```json
+"classificacao": {
+  "pontuacao_final": 8.75,
+  "categoria": "Ouro",
+  "pontuacoes_criterios": {
+    "faturamento": {
+      "valor": 35000.00,
+      "pontuacao": 8,
+      "peso": 0.40,
+      "ponderado": 3.20
+    },
+    "frequencia": {
+      "valor": 5,
+      "pontuacao": 8,
+      "peso": 0.25,
+      "ponderado": 2.00
+    },
+    "pontualidade": {
+      "valor_pagos_em_dia": 90.0,
+      "valor_pagos_ate_7d": 5.0,
+      "pontuacao": 10,
+      "peso": 0.15,
+      "ponderado": 1.50
+    },
+    "volume_pecas": {
+      "valor": 250,
+      "pontuacao": 8,
+      "peso": 0.10,
+      "ponderado": 0.80
+    },
+    "diversificacao": {
+      "valor": 5,
+      "pontuacao": 8,
+      "peso": 0.10,
+      "ponderado": 0.80
+    }
+  },
+  "detalhes": {
+    "descricao_categoria": "Cliente frequente e fiel, com bom volume de compras e pontualidade nos pagamentos.",
+    "sugestoes": [
+      "Inclusão em sorteios exclusivos",
+      "Concessão de crédito extra",
+      "Descontos especiais em determinadas marcas",
+      "Atendimento personalizado",
+      "Acesso antecipado a novos lançamentos"
+    ]
+  }
+}
+```
+
+### Descrição dos Campos de Classificação
+
+- **pontuacao_final**: Pontuação ponderada final do cliente (0-10)
+- **categoria**: Categoria do cliente (Diamante, Ouro, Prata ou Bronze)
+- **pontuacoes_criterios**: Detalhamento das pontuações por critério
+  - **faturamento**: Pontuação referente ao faturamento líquido
+  - **frequencia**: Pontuação referente à frequência de compras
+  - **pontualidade**: Pontuação referente à pontualidade nos pagamentos
+  - **volume_pecas**: Pontuação referente ao volume de peças adquiridas
+  - **diversificacao**: Pontuação referente à diversificação de marcas
+- **detalhes**: Informações adicionais sobre a classificação
+  - **descricao_categoria**: Descrição textual da categoria do cliente
+  - **sugestoes**: Lista de sugestões de benefícios e ações recomendadas para o cliente
+
 ## Cálculos e Considerações Importantes
 
 1. **Faturamento Líquido**: É calculado pela diferença entre o total de vendas e o total de devoluções.

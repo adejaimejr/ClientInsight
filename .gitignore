@@ -1,6 +1,8 @@
 # Arquivos de ambiente
 .env
 
+.json
+
 # Arquivos de cache Python
 __pycache__/
 *.py[cod]
